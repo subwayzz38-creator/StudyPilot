@@ -1,5 +1,11 @@
 package ke.studypilot.app
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import java.util.Locale
 import android.Manifest
 import android.app.*
 import android.content.*
@@ -64,15 +70,423 @@ object Scheduler {
 class ReminderReceiver:BroadcastReceiver(){override fun onReceive(c:Context,i:Intent){val n=NotificationCompat.Builder(c,CHANNEL).setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle(i.getStringExtra("title")?:"StudyPilot").setContentText(i.getStringExtra("body")?:"Check your timetable").setPriority(NotificationCompat.PRIORITY_HIGH).setAutoCancel(true).build();try{NotificationManagerCompat.from(c).notify((System.currentTimeMillis()%100000).toInt(),n)}catch(_:SecurityException){}}}
 class BootReceiver:BroadcastReceiver(){override fun onReceive(c:Context,i:Intent){Scheduler.schedule(c)}}
 
+
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable fun Screen(){val c= LocalContext.current;val prefs=remember{c.getSharedPreferences(PREFS,Context.MODE_PRIVATE)};var done by remember{mutableStateOf(prefs.getStringSet("done",emptySet())?:emptySet())};var notify by remember{mutableStateOf(prefs.getBoolean("notify",true))};val today=LocalDate.now(ZoneId.of(ZONE)).toString();val todayList=sessions.filter{it.day==today};Scaffold(topBar={TopAppBar(title={Text("StudyPilot",fontWeight=FontWeight.Bold)})}){pad->LazyColumn(Modifier.fillMaxSize().padding(pad).padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){
- item{Card(Modifier.fillMaxWidth()){Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){Text("Your exam preparation",style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Bold);Text("25 Nov – 10 Dec 2026 • Kenya time");LinearProgressIndicator(progress={done.size.toFloat()/sessions.size},modifier=Modifier.fillMaxWidth());Text("${done.size} of ${sessions.size} sessions completed")}}}
- item{Card(Modifier.fillMaxWidth()){Row(Modifier.fillMaxWidth().padding(12.dp),verticalAlignment=Alignment.CenterVertically){Column(Modifier.weight(1f)){Text("Notifications",fontWeight=FontWeight.Bold);Text("Study starts, breaks, session ends and exams",style=MaterialTheme.typography.bodySmall)};Switch(checked=notify,onCheckedChange = { v -> notify=v;prefs.edit().putBoolean("notify",v).apply();if(v)Scheduler.schedule(c) else Scheduler.cancel(c) })}}}
- item{Text("TODAY",style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.Bold)}
- if(todayList.isEmpty())item{Text("No scheduled sessions today. See the full timetable below.")}
- items(todayList){s->SessionRow(s,done.contains(s.id)){val x=done.toMutableSet();if(x.contains(s.id))x.remove(s.id)else x.add(s.id);done=x;prefs.edit().putStringSet("done",x).apply()}}
- item{Text("FULL TIMETABLE",style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.Bold)}
- items(sessions){s->SessionRow(s,done.contains(s.id)){val x=done.toMutableSet();if(x.contains(s.id))x.remove(s.id)else x.add(s.id);done=x;prefs.edit().putStringSet("done",x).apply()}}
- item{Text("Allow notifications when asked. Battery-saving settings may delay reminders. Sunday study is scheduled for evening only.",style=MaterialTheme.typography.bodySmall);Spacer(Modifier.height(24.dp))}
-}}}
-@Composable fun SessionRow(s:Session,checked:Boolean,onCheck:()->Unit){Card(Modifier.fillMaxWidth()){Row(Modifier.padding(12.dp),verticalAlignment=Alignment.CenterVertically){Column(Modifier.weight(1f)){Text("${s.day} • ${s.start}–${s.end}",style=MaterialTheme.typography.labelMedium);Text(s.subject+(if(s.exam)" — EXAM" else ""),fontWeight=FontWeight.Bold);Text(s.topic,style=MaterialTheme.typography.bodyMedium)};Checkbox(checked=checked,onCheckedChange = { onCheck() })}}}
+@Composable
+fun Screen() {
+    val c = LocalContext.current
+    val prefs = remember {
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    }
+
+    var done by remember {
+        mutableStateOf(prefs.getStringSet("done", emptySet()) ?: emptySet())
+    }
+    var notify by remember { mutableStateOf(prefs.getBoolean("notify", true)) }
+    var dark by remember { mutableStateOf(prefs.getBoolean("dark", false)) }
+    var tab by remember { mutableIntStateOf(0) }
+    var selectedDay by remember {
+        mutableStateOf(LocalDate.now(ZoneId.of(ZONE)).toString())
+    }
+
+    val units = remember {
+        mutableStateListOf("CSC 212", "CSC 211", "SMA 215", "SMA 214", "SMA 206/211", "SMA 202", "SMA 213")
+    }
+    var newUnit by remember { mutableStateOf("") }
+
+    MaterialTheme(
+        colorScheme = if (dark) darkColorScheme() else lightColorScheme()
+    ) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Text("StudyPilot", fontWeight = FontWeight.Bold)
+                    }
+                )
+            },
+            bottomBar = {
+                NavigationBar {
+                    listOf("Home", "Timetable", "My Units", "Performance", "Settings")
+                        .forEachIndexed { index, label ->
+                            NavigationBarItem(
+                                selected = tab == index,
+                                onClick = { tab = index },
+                                icon = {
+                                    Text(
+                                        listOf("⌂", "▦", "▤", "％", "⚙")[index]
+                                    )
+                                },
+                                label = { Text(label) }
+                            )
+                        }
+                }
+            }
+        ) { padding ->
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(16.dp)
+            ) {
+                when (tab) {
+                    0 -> {
+                        Text("Welcome back!", style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold)
+                        Text("Your academic command centre")
+                        Spacer(Modifier.height(16.dp))
+
+                        Card(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(16.dp)) {
+                                Text("Study progress", fontWeight = FontWeight.Bold)
+                                Spacer(Modifier.height(8.dp))
+                                LinearProgressIndicator(
+                                    progress = {
+                                        if (sessions.isEmpty()) 0f
+                                        else done.size.toFloat() / sessions.size
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Text("${done.size} of ${sessions.size} sessions completed")
+                            }
+                        }
+
+                        Spacer(Modifier.height(12.dp))
+                        Text("Your next sessions", style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold)
+
+                        val today = LocalDate.now(ZoneId.of(ZONE)).toString()
+                        val upcoming = sessions.filter {
+                            it.day >= today && !done.contains(it.id)
+                        }.take(4)
+
+                        if (upcoming.isEmpty()) {
+                            Text("No upcoming sessions.")
+                        } else {
+                            upcoming.forEach { s ->
+                                SessionRow(s, done.contains(s.id)) {
+                                    val x = done.toMutableSet()
+                                    if (!x.add(s.id)) x.remove(s.id)
+                                    done = x
+                                    prefs.edit().putStringSet("done", x).apply()
+                                }
+                            }
+                        }
+
+                        Spacer(Modifier.height(12.dp))
+                        Button(onClick = { tab = 1 }, Modifier.fillMaxWidth()) {
+                            Text("Open weekly timetable")
+                        }
+                    }
+
+                    1 -> {
+                        Text("Weekly timetable",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold)
+                        Text("Select a day to see its study plan.")
+                        Spacer(Modifier.height(12.dp))
+
+                        val days = (0..6).map {
+                            LocalDate.now(ZoneId.of(ZONE))
+                                .with(java.time.DayOfWeek.MONDAY)
+                                .plusDays(it.toLong())
+                        }
+
+                        Row(
+                            Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            days.forEach { date ->
+                                FilterChip(
+                                    selected = selectedDay == date.toString(),
+                                    onClick = { selectedDay = date.toString() },
+                                    label = {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text(date.dayOfWeek.name.take(3))
+                                            Text(date.dayOfMonth.toString())
+                                        }
+                                    }
+                                )
+                            }
+                        }
+
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            LocalDate.parse(selectedDay).dayOfWeek.name,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        val daily = sessions.filter { it.day == selectedDay }
+
+                        if (daily.isEmpty()) {
+                            Text("No study sessions scheduled for this day.")
+                        } else {
+                            LazyColumn(
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items(daily) { s ->
+                                    SessionRow(s, done.contains(s.id)) {
+                                        val x = done.toMutableSet()
+                                        if (!x.add(s.id)) x.remove(s.id)
+                                        done = x
+                                        prefs.edit().putStringSet("done", x).apply()
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    2 -> {
+                        Text("My Units",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold)
+                        Text("Manage the units you are studying.")
+                        Spacer(Modifier.height(12.dp))
+
+                        OutlinedTextField(
+                            value = newUnit,
+                            onValueChange = { newUnit = it },
+                            label = { Text("Enter unit name or code") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        Button(
+                            onClick = {
+                                val value = newUnit.trim()
+                                if (value.isNotEmpty() &&
+                                    !units.contains(value)) {
+                                    units.add(value)
+                                    newUnit = ""
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Add unit")
+                        }
+
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(units) { unit ->
+                                Card(Modifier.fillMaxWidth()) {
+                                    Row(
+                                        Modifier.padding(16.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(unit, Modifier.weight(1f),
+                                            fontWeight = FontWeight.Bold)
+                                        TextButton(onClick = { units.remove(unit) }) {
+                                            Text("Remove")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    3 -> {
+                        PerformanceScreen()
+                    }
+
+                    4 -> {
+                        Text("Settings",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(16.dp))
+
+                        Card(Modifier.fillMaxWidth()) {
+                            Row(
+                                Modifier.padding(16.dp).fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Dark mode", fontWeight = FontWeight.Bold)
+                                    Text("Use a darker appearance")
+                                }
+                                Switch(
+                                    checked = dark,
+                                    onCheckedChange = {
+                                        dark = it
+                                        prefs.edit().putBoolean("dark", it).apply()
+                                    }
+                                )
+                            }
+                        }
+
+                        Spacer(Modifier.height(8.dp))
+
+                        Card(Modifier.fillMaxWidth()) {
+                            Row(
+                                Modifier.padding(16.dp).fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Notifications", fontWeight = FontWeight.Bold)
+                                    Text("Study, break and exam reminders")
+                                }
+                                Switch(
+                                    checked = notify,
+                                    onCheckedChange = {
+                                        notify = it
+                                        prefs.edit().putBoolean("notify", it).apply()
+                                        if (it) Scheduler.schedule(c)
+                                        else Scheduler.cancel(c)
+                                    }
+                                )
+                            }
+                        }
+
+                        Spacer(Modifier.height(12.dp))
+                        Text("StudyPilot • Version 2.0")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PerformanceScreen() {
+    var cat1 by remember { mutableStateOf("9") }
+    var max1 by remember { mutableStateOf("15") }
+    var cat2 by remember { mutableStateOf("15") }
+    var max2 by remember { mutableStateOf("20") }
+    var target by remember { mutableStateOf("70") }
+
+    val a = cat1.toDoubleOrNull()
+    val b = max1.toDoubleOrNull()
+    val d = cat2.toDoubleOrNull()
+    val e = max2.toDoubleOrNull()
+    val goal = target.toDoubleOrNull()
+
+    val valid = a != null && b != null && d != null && e != null &&
+        b > 0 && e > 0 && a >= 0 && d >= 0 &&
+        a <= b && d <= e && goal != null && goal in 0.0..100.0
+
+    val coursework = if (valid)
+        ((a!! + d!!) / (b!! + e!!) * 30.0)
+    else 0.0
+
+    val needed = if (valid) goal!! - coursework else 0.0
+
+    val grade = if (!valid) "-"
+        else when {
+            coursework >= 0 && goal!! >= 70 -> "A target"
+            goal!! >= 60 -> "B target"
+            goal!! >= 50 -> "C target"
+            goal!! >= 40 -> "D target"
+            else -> "Below D target"
+        }
+
+    LazyColumn(
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        item {
+            Text("CAT & Exam Calculator",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold)
+            Text("Coursework contributes 30 marks. The final exam contributes 70.")
+        }
+
+        item {
+            OutlinedTextField(
+                value = cat1, onValueChange = { cat1 = it },
+                label = { Text("CAT 1 score") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+        item {
+            OutlinedTextField(
+                value = max1, onValueChange = { max1 = it },
+                label = { Text("CAT 1 maximum marks") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+        item {
+            OutlinedTextField(
+                value = cat2, onValueChange = { cat2 = it },
+                label = { Text("CAT 2 score") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+        item {
+            OutlinedTextField(
+                value = max2, onValueChange = { max2 = it },
+                label = { Text("CAT 2 maximum marks") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+        item {
+            OutlinedTextField(
+                value = target, onValueChange = { target = it },
+                label = { Text("Desired final mark (e.g. 70)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        item {
+            if (valid) {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Your results", style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold)
+                        Text("Coursework: ${String.format(Locale.US, "%.2f", coursework)} / 30")
+                        Text("Exam maximum: 70")
+                        HorizontalDivider()
+                        Text("Exam marks needed: ${String.format(Locale.US, "%.2f", needed)} / 70",
+                            fontWeight = FontWeight.Bold)
+                        Text(grade)
+                        when {
+                            needed <= 0 -> Text("You have already reached this target through coursework.")
+                            needed > 70 -> Text("This target is no longer reachable.")
+                            else -> Text("You need at least ${kotlin.math.ceil(needed).toInt()} exam marks to reach your target.")
+                        }
+                    }
+                }
+            } else {
+                Text("Enter valid CAT scores and maximum marks. Scores cannot exceed their maximum.")
+            }
+        }
+
+        item {
+            Text("Default grade targets",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold)
+            Text("A: 70–100")
+            Text("B: 60–69")
+            Text("C: 50–59")
+            Text("D: 40–49")
+            Text("Below 40: F")
+            Text("Grade boundaries can be adjusted if the official university regulations differ.",
+                style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+@Composable
+fun SessionRow(s: Session, checked: Boolean, onCheck: () -> Unit) {
+    Card(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("${s.day} • ${s.start}–${s.end}",
+                    style = MaterialTheme.typography.labelMedium)
+                Text(
+                    s.subject + if (s.exam) " — EXAM" else "",
+                    fontWeight = FontWeight.Bold
+                )
+                Text(s.topic, style = MaterialTheme.typography.bodyMedium)
+            }
+            Checkbox(checked = checked, onCheckedChange = { onCheck() })
+        }
+    }
+}
+
