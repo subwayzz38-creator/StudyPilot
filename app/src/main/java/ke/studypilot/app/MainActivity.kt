@@ -1,11 +1,5 @@
 package ke.studypilot.app
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.text.input.KeyboardType
-import java.util.Locale
 import android.Manifest
 import android.app.*
 import android.content.*
@@ -15,19 +9,27 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.*
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import java.time.*
+import java.util.Locale
 
 private const val CHANNEL = "study_reminders"
 private const val PREFS = "study_pilot"
@@ -70,275 +72,287 @@ object Scheduler {
 class ReminderReceiver:BroadcastReceiver(){override fun onReceive(c:Context,i:Intent){val n=NotificationCompat.Builder(c,CHANNEL).setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle(i.getStringExtra("title")?:"StudyPilot").setContentText(i.getStringExtra("body")?:"Check your timetable").setPriority(NotificationCompat.PRIORITY_HIGH).setAutoCancel(true).build();try{NotificationManagerCompat.from(c).notify((System.currentTimeMillis()%100000).toInt(),n)}catch(_:SecurityException){}}}
 class BootReceiver:BroadcastReceiver(){override fun onReceive(c:Context,i:Intent){Scheduler.schedule(c)}}
 
+private val Ink = Color(0xFF070A18)
+private val Panel = Color(0xFF11182D)
+private val Panel2 = Color(0xFF171D38)
+private val Violet = Color(0xFF8757FF)
+private val Blue = Color(0xFF3478FF)
+private val Cyan = Color(0xFF42D9F5)
+private val Mint = Color(0xFF35D6B0)
+private val Muted = Color(0xFF9AA7C5)
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun Screen() {
-    val c = LocalContext.current
-    val prefs = remember {
-        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-    }
-
-    var done by remember {
-        mutableStateOf(prefs.getStringSet("done", emptySet()) ?: emptySet())
-    }
-    var notify by remember { mutableStateOf(prefs.getBoolean("notify", true)) }
-    var dark by remember { mutableStateOf(prefs.getBoolean("dark", false)) }
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
     var tab by remember { mutableIntStateOf(0) }
-    var selectedDay by remember {
-        mutableStateOf(LocalDate.now(ZoneId.of(ZONE)).toString())
-    }
-
+    var welcome by remember { mutableStateOf(!prefs.getBoolean("welcome_done", false)) }
+    var showSettings by remember { mutableStateOf(false) }
+    var notify by remember { mutableStateOf(prefs.getBoolean("notify", true)) }
+    var done by remember { mutableStateOf(prefs.getStringSet("done", emptySet()) ?: emptySet()) }
     val units = remember {
-        mutableStateListOf("CSC 212", "CSC 211", "SMA 215", "SMA 214", "SMA 206/211", "SMA 202", "SMA 213")
+        mutableStateListOf<String>().apply {
+            addAll(prefs.getStringSet("units", null)?.toList()?.sorted()
+                ?: listOf("CSC 212", "CSC 211", "SMA 215", "SMA 214", "SMA 206/211", "SMA 202", "SMA 213"))
+        }
     }
-    var newUnit by remember { mutableStateOf("") }
+    var selectedDay by remember { mutableStateOf(LocalDate.now(ZoneId.of(ZONE)).toString()) }
 
     MaterialTheme(
-        colorScheme = if (dark) darkColorScheme() else lightColorScheme()
+        colorScheme = darkColorScheme(
+            primary = Violet, secondary = Cyan, tertiary = Mint,
+            background = Ink, surface = Panel, onBackground = Color.White,
+            onSurface = Color.White
+        )
     ) {
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = {
-                        Text("StudyPilot", fontWeight = FontWeight.Bold)
+        if (welcome) {
+            WelcomeScreen {
+                welcome = false
+                prefs.edit().putBoolean("welcome_done", true).apply()
+            }
+        } else {
+            Scaffold(
+                containerColor = Ink,
+                topBar = {
+                    Row(
+                        Modifier.fillMaxWidth().background(Ink).padding(horizontal = 20.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("STUDYPILOT", color = Color.White, fontWeight = FontWeight.Black,
+                                style = MaterialTheme.typography.titleLarge, letterSpacing = 2.sp)
+                            Text("YOUR ACADEMIC COMMAND CENTRE", color = Muted,
+                                style = MaterialTheme.typography.labelSmall, letterSpacing = 1.sp)
+                        }
+                        NeonAction("⚙", onClick = { showSettings = !showSettings })
                     }
-                )
-            },
-            bottomBar = {
-                NavigationBar {
-                    listOf("Home", "Timetable", "My Units", "Performance", "Settings")
-                        .forEachIndexed { index, label ->
+                },
+                bottomBar = {
+                    NavigationBar(containerColor = Color(0xFF0D1224), contentColor = Color.White) {
+                        val labels = listOf("Home", "Plan", "Units", "Grades", "AI")
+                        val glyphs = listOf("⌂", "▦", "▤", "◈", "✧")
+                        labels.forEachIndexed { index, label ->
                             NavigationBarItem(
                                 selected = tab == index,
-                                onClick = { tab = index },
-                                icon = {
-                                    Text(
-                                        listOf("⌂", "▦", "▤", "％", "⚙")[index]
-                                    )
-                                },
-                                label = { Text(label) }
+                                onClick = { tab = index; showSettings = false },
+                                icon = { Text(glyphs[index], color = if (tab == index) Cyan else Muted) },
+                                label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = Cyan, selectedTextColor = Cyan,
+                                    indicatorColor = Color(0xFF25234A),
+                                    unselectedIconColor = Muted, unselectedTextColor = Muted
+                                )
                             )
                         }
+                    }
+                }
+            ) { padding ->
+                Column(Modifier.fillMaxSize().padding(padding)) {
+                    if (showSettings) {
+                        SettingsScreen(notify, { enabled ->
+                            notify = enabled
+                            prefs.edit().putBoolean("notify", enabled).apply()
+                            if (enabled) Scheduler.schedule(context) else Scheduler.cancel(context)
+                        })
+                    } else {
+                        when (tab) {
+                            0 -> HomeScreen(done, sessions, onQuickTab = { tab = it }) { s ->
+                                val updated = done.toMutableSet()
+                                if (!updated.add(s.id)) updated.remove(s.id)
+                                done = updated
+                                prefs.edit().putStringSet("done", updated).apply()
+                            }
+                            1 -> TimetableScreen(selectedDay, { selectedDay = it }, done) { s ->
+                                val updated = done.toMutableSet()
+                                if (!updated.add(s.id)) updated.remove(s.id)
+                                done = updated
+                                prefs.edit().putStringSet("done", updated).apply()
+                            }
+                            2 -> UnitsScreen(units) {
+                                prefs.edit().putStringSet("units", units.toSet()).apply()
+                            }
+                            3 -> PerformanceScreen(prefs)
+                            else -> AssistantScreen()
+                        }
+                    }
                 }
             }
-        ) { padding ->
-            Column(
-                Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .padding(16.dp)
+        }
+    }
+}
+
+@Composable
+private fun WelcomeScreen(onContinue: () -> Unit) {
+    Box(Modifier.fillMaxSize().background(
+        Brush.linearGradient(listOf(Color(0xFF090B1B), Color(0xFF17113B), Color(0xFF071D35)))
+    ).padding(26.dp), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                Modifier.size(112.dp).background(
+                    Brush.linearGradient(listOf(Violet, Blue, Cyan)), RoundedCornerShape(32.dp)
+                ),
+                contentAlignment = Alignment.Center
             ) {
-                when (tab) {
-                    0 -> {
-                        Text("Welcome back!", style = MaterialTheme.typography.headlineMedium,
-                            fontWeight = FontWeight.Bold)
-                        Text("Your academic command centre")
-                        Spacer(Modifier.height(16.dp))
+                Text("✦", color = Color.White, fontSize = 58.sp, fontWeight = FontWeight.Black)
+            }
+            Spacer(Modifier.height(28.dp))
+            Text("StudyPilot", color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold)
+            Text("YOUR STUDY LIFE. UNDER CONTROL.", color = Cyan, letterSpacing = 2.sp,
+                style = MaterialTheme.typography.labelMedium)
+            Spacer(Modifier.height(18.dp))
+            Text("Plan smarter. Learn deeper. Achieve more.",
+                color = Color(0xFFB9C5E0), textAlign = TextAlign.Center)
+            Spacer(Modifier.height(42.dp))
+            GradientButton("GET STARTED", onContinue)
+        }
+    }
+}
 
-                        Card(Modifier.fillMaxWidth()) {
-                            Column(Modifier.padding(16.dp)) {
-                                Text("Study progress", fontWeight = FontWeight.Bold)
-                                Spacer(Modifier.height(8.dp))
-                                LinearProgressIndicator(
-                                    progress = {
-                                        if (sessions.isEmpty()) 0f
-                                        else done.size.toFloat() / sessions.size
-                                    },
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                                Text("${done.size} of ${sessions.size} sessions completed")
-                            }
-                        }
-
-                        Spacer(Modifier.height(12.dp))
-                        Text("Your next sessions", style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold)
-
-                        val today = LocalDate.now(ZoneId.of(ZONE)).toString()
-                        val upcoming = sessions.filter {
-                            it.day >= today && !done.contains(it.id)
-                        }.take(4)
-
-                        if (upcoming.isEmpty()) {
-                            Text("No upcoming sessions.")
-                        } else {
-                            upcoming.forEach { s ->
-                                SessionRow(s, done.contains(s.id)) {
-                                    val x = done.toMutableSet()
-                                    if (!x.add(s.id)) x.remove(s.id)
-                                    done = x
-                                    prefs.edit().putStringSet("done", x).apply()
-                                }
-                            }
-                        }
-
-                        Spacer(Modifier.height(12.dp))
-                        Button(onClick = { tab = 1 }, Modifier.fillMaxWidth()) {
-                            Text("Open weekly timetable")
-                        }
+@Composable
+private fun HomeScreen(done: Set<String>, allSessions: List<Session>, onQuickTab: (Int) -> Unit, onToggle: (Session) -> Unit) {
+    val today = LocalDate.now(ZoneId.of(ZONE)).toString()
+    val upcoming = allSessions.filter { it.day >= today && !done.contains(it.id) }.take(3)
+    val progress = if (allSessions.isEmpty()) 0f else done.size.toFloat() / allSessions.size
+    val nextExam = allSessions.firstOrNull { it.exam && it.day >= today }
+    val daysToExam = nextExam?.let {
+        runCatching { java.time.temporal.ChronoUnit.DAYS.between(LocalDate.now(ZoneId.of(ZONE)), LocalDate.parse(it.day)).toInt() }.getOrDefault(0)
+    }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp)) {
+        Text("Good to see you.", color = Muted, style = MaterialTheme.typography.bodyMedium)
+        Text("Ready to make progress?", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(18.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            NeonPanel(Modifier.weight(1.25f)) {
+                Text("YOUR PROGRESS", color = Muted, style = MaterialTheme.typography.labelSmall, letterSpacing = 1.sp)
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(progress = { progress }, modifier = Modifier.size(76.dp),
+                            color = Cyan, trackColor = Color(0xFF293451), strokeWidth = 7.dp)
+                        Text("${(progress * 100).toInt()}%", color = Color.White, fontWeight = FontWeight.Bold)
                     }
-
-                    1 -> {
-                        Text("Weekly timetable",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold)
-                        Text("Select a day to see its study plan.")
-                        Spacer(Modifier.height(12.dp))
-
-                        val days = (0..6).map {
-                            LocalDate.now(ZoneId.of(ZONE))
-                                .with(java.time.DayOfWeek.MONDAY)
-                                .plusDays(it.toLong())
-                        }
-
-                        Row(
-                            Modifier.horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            days.forEach { date ->
-                                FilterChip(
-                                    selected = selectedDay == date.toString(),
-                                    onClick = { selectedDay = date.toString() },
-                                    label = {
-                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text(date.dayOfWeek.name.take(3))
-                                            Text(date.dayOfMonth.toString())
-                                        }
-                                    }
-                                )
-                            }
-                        }
-
-                        Spacer(Modifier.height(12.dp))
-                        Text(
-                            LocalDate.parse(selectedDay).dayOfWeek.name,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold
-                        )
-
-                        val daily = sessions.filter { it.day == selectedDay }
-
-                        if (daily.isEmpty()) {
-                            Text("No study sessions scheduled for this day.")
-                        } else {
-                            LazyColumn(
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                items(daily) { s ->
-                                    SessionRow(s, done.contains(s.id)) {
-                                        val x = done.toMutableSet()
-                                        if (!x.add(s.id)) x.remove(s.id)
-                                        done = x
-                                        prefs.edit().putStringSet("done", x).apply()
-                                    }
-                                }
-                            }
-                        }
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text("${done.size}/${allSessions.size}", color = Color.White,
+                            style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text("Sessions done", color = Muted, style = MaterialTheme.typography.labelSmall)
                     }
+                }
+            }
+            NeonPanel(Modifier.weight(0.85f), accent = Violet) {
+                Text("EXAM COUNTDOWN", color = Muted, style = MaterialTheme.typography.labelSmall)
+                Spacer(Modifier.height(10.dp))
+                Text(daysToExam?.coerceAtLeast(0)?.toString() ?: "—", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
+                Text("DAYS TO GO", color = Cyan, style = MaterialTheme.typography.labelSmall)
+                Text(nextExam?.let { "${it.subject} • ${it.day}" } ?: "No upcoming exam", color = Muted, style = MaterialTheme.typography.labelSmall)
+            }
+        }
+        Spacer(Modifier.height(18.dp))
+        SectionHeading("UP NEXT", "Your upcoming sessions")
+        if (upcoming.isEmpty()) {
+            NeonPanel { Text("No upcoming sessions. You're all caught up.", color = Muted) }
+        } else upcoming.forEach { s -> SessionTile(s, done.contains(s.id)) { onToggle(s) } }
+        Spacer(Modifier.height(14.dp))
+        SectionHeading("QUICK ACCESS", "Keep your momentum")
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            QuickTile("▦", "Timetable", Modifier.weight(1f), Violet) { onQuickTab(1) }
+            QuickTile("◈", "My grades", Modifier.weight(1f), Cyan) { onQuickTab(3) }
+            QuickTile("✧", "AI tutor", Modifier.weight(1f), Mint) { onQuickTab(4) }
+        }
+    }
+}
 
-                    2 -> {
-                        Text("My Units",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold)
-                        Text("Manage the units you are studying.")
-                        Spacer(Modifier.height(12.dp))
+@Composable
+private fun TimetableScreen(selectedDay: String, onDay: (String) -> Unit, done: Set<String>, onToggle: (Session) -> Unit) {
+    var weekOffset by remember { mutableIntStateOf(0) }
+    val monday = LocalDate.now(ZoneId.of(ZONE)).with(java.time.DayOfWeek.MONDAY).plusWeeks(weekOffset.toLong())
+    val days = (0..6).map { monday.plusDays(it.toLong()) }
+    val date = runCatching { LocalDate.parse(selectedDay) }.getOrDefault(monday)
+    val daily = sessions.filter { it.day == date.toString() }
+    Column(Modifier.fillMaxSize().padding(18.dp)) {
+        SectionHeading("YOUR PLAN", "Weekly timetable")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(monday.format(java.time.format.DateTimeFormatter.ofPattern("d MMM")) +
+                " – " + monday.plusDays(6).format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy")),
+                color = Cyan, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
+            TextButton(onClick = {
+                weekOffset--
+                onDay(monday.minusWeeks(1).toString())
+            }) { Text("‹", color = Cyan, fontSize = 22.sp) }
+            TextButton(onClick = {
+                weekOffset++
+                onDay(monday.plusWeeks(1).toString())
+            }) { Text("›", color = Cyan, fontSize = 22.sp) }
+        }
+        Spacer(Modifier.height(14.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            days.forEach { d ->
+                val active = d == date
+                Column(
+                    Modifier.weight(1f).clip(RoundedCornerShape(14.dp))
+                        .background(if (active) Brush.linearGradient(listOf(Violet, Blue)) else Brush.linearGradient(listOf(Panel, Panel)))
+                        .clickable { onDay(d.toString()) }.padding(vertical = 12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(d.dayOfWeek.name.take(1), color = if (active) Color.White else Muted,
+                        style = MaterialTheme.typography.labelSmall)
+                    Text(d.dayOfMonth.toString(), color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        Spacer(Modifier.height(18.dp))
+        Text(date.format(java.time.format.DateTimeFormatter.ofPattern("EEEE, d MMMM")),
+            color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(10.dp))
+        if (daily.isEmpty()) {
+            NeonPanel { Text("No sessions scheduled for this day.", color = Muted) }
+        } else {
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                daily.forEach { s -> SessionTile(s, done.contains(s.id)) { onToggle(s) } }
+            }
+        }
+    }
+}
 
-                        OutlinedTextField(
-                            value = newUnit,
-                            onValueChange = { newUnit = it },
-                            label = { Text("Enter unit name or code") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
-                        Button(
-                            onClick = {
-                                val value = newUnit.trim()
-                                if (value.isNotEmpty() &&
-                                    !units.contains(value)) {
-                                    units.add(value)
-                                    newUnit = ""
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Add unit")
+@Composable
+private fun UnitsScreen(units: SnapshotStateList<String>, onSave: () -> Unit) {
+    var entry by remember { mutableStateOf("") }
+    Column(Modifier.fillMaxSize().padding(18.dp)) {
+        SectionHeading("YOUR COURSES", "My Units")
+        Text("Manage your units and keep learning materials organised.", color = Muted)
+        Spacer(Modifier.height(14.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(value = entry, onValueChange = { entry = it },
+                modifier = Modifier.weight(1f), singleLine = true,
+                label = { Text("Unit code or name") },
+                colors = neonFieldColors())
+            Spacer(Modifier.width(8.dp))
+            GradientButton("+", {
+                val value = entry.trim()
+                if (value.isNotEmpty() && value !in units) {
+                    units.add(value)
+                    entry = ""
+                    onSave()
+                }
+            }, compact = true)
+        }
+        Spacer(Modifier.height(14.dp))
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            units.forEachIndexed { index, unit ->
+                NeonPanel(accent = if (index % 2 == 0) Violet else Blue) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(42.dp).background(Color(0xFF28234F), RoundedCornerShape(12.dp)),
+                            contentAlignment = Alignment.Center) {
+                            Text("▤", color = Cyan, fontSize = 20.sp)
                         }
-
-                        LazyColumn(
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            items(units) { unit ->
-                                Card(Modifier.fillMaxWidth()) {
-                                    Row(
-                                        Modifier.padding(16.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(unit, Modifier.weight(1f),
-                                            fontWeight = FontWeight.Bold)
-                                        TextButton(onClick = { units.remove(unit) }) {
-                                            Text("Remove")
-                                        }
-                                    }
-                                }
-                            }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(unit, color = Color.White, fontWeight = FontWeight.Bold)
+                            Text("Topics and study materials", color = Muted, style = MaterialTheme.typography.labelSmall)
                         }
-                    }
-
-                    3 -> {
-                        PerformanceScreen()
-                    }
-
-                    4 -> {
-                        Text("Settings",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(16.dp))
-
-                        Card(Modifier.fillMaxWidth()) {
-                            Row(
-                                Modifier.padding(16.dp).fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(Modifier.weight(1f)) {
-                                    Text("Dark mode", fontWeight = FontWeight.Bold)
-                                    Text("Use a darker appearance")
-                                }
-                                Switch(
-                                    checked = dark,
-                                    onCheckedChange = {
-                                        dark = it
-                                        prefs.edit().putBoolean("dark", it).apply()
-                                    }
-                                )
-                            }
-                        }
-
-                        Spacer(Modifier.height(8.dp))
-
-                        Card(Modifier.fillMaxWidth()) {
-                            Row(
-                                Modifier.padding(16.dp).fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(Modifier.weight(1f)) {
-                                    Text("Notifications", fontWeight = FontWeight.Bold)
-                                    Text("Study, break and exam reminders")
-                                }
-                                Switch(
-                                    checked = notify,
-                                    onCheckedChange = {
-                                        notify = it
-                                        prefs.edit().putBoolean("notify", it).apply()
-                                        if (it) Scheduler.schedule(c)
-                                        else Scheduler.cancel(c)
-                                    }
-                                )
-                            }
-                        }
-
-                        Spacer(Modifier.height(12.dp))
-                        Text("StudyPilot • Version 2.0")
+                        Text("›", color = Cyan, fontSize = 26.sp)
                     }
                 }
             }
@@ -347,146 +361,227 @@ fun Screen() {
 }
 
 @Composable
-fun PerformanceScreen() {
-    var cat1 by remember { mutableStateOf("9") }
-    var max1 by remember { mutableStateOf("15") }
-    var cat2 by remember { mutableStateOf("15") }
-    var max2 by remember { mutableStateOf("20") }
-    var target by remember { mutableStateOf("70") }
+private fun PerformanceScreen(prefs: android.content.SharedPreferences) {
+    var unit by remember { mutableStateOf(prefs.getString("cat_unit", "CSC 212") ?: "CSC 212") }
+    val initialUnitKey = unit.trim().ifBlank { "default" }.replace(Regex("[^A-Za-z0-9_-]"), "_")
+    var cat1 by remember { mutableStateOf(prefs.getString("cat_${initialUnitKey}_cat1", "9") ?: "9") }
+    var max1 by remember { mutableStateOf(prefs.getString("cat_${initialUnitKey}_max1", "15") ?: "15") }
+    var cat2 by remember { mutableStateOf(prefs.getString("cat_${initialUnitKey}_cat2", "15") ?: "15") }
+    var max2 by remember { mutableStateOf(prefs.getString("cat_${initialUnitKey}_max2", "20") ?: "20") }
+    var target by remember { mutableStateOf(prefs.getString("cat_${initialUnitKey}_target", "70") ?: "70") }
 
-    val a = cat1.toDoubleOrNull()
-    val b = max1.toDoubleOrNull()
-    val d = cat2.toDoubleOrNull()
-    val e = max2.toDoubleOrNull()
+    val c1 = cat1.toDoubleOrNull()
+    val m1 = max1.toDoubleOrNull()
+    val c2 = cat2.toDoubleOrNull()
+    val m2 = max2.toDoubleOrNull()
     val goal = target.toDoubleOrNull()
+    val valid = c1 != null && m1 != null && c2 != null && m2 != null && goal != null &&
+        m1 > 0 && m2 > 0 && c1 >= 0 && c2 >= 0 && c1 <= m1 && c2 <= m2 &&
+        goal in 0.0..100.0
+    val coursework = if (valid) ((c1!! + c2!!) / (m1!! + m2!!) * 30.0) else 0.0
+    val examNeeded = if (valid) goal!! - coursework else 0.0
+    val minExam = kotlin.math.ceil(examNeeded).toInt()
 
-    val valid = a != null && b != null && d != null && e != null &&
-        b > 0 && e > 0 && a >= 0 && d >= 0 &&
-        a <= b && d <= e && goal != null && goal in 0.0..100.0
-
-    val coursework = if (valid)
-        ((a!! + d!!) / (b!! + e!!) * 30.0)
-    else 0.0
-
-    val needed = if (valid) goal!! - coursework else 0.0
-
-    val grade = if (!valid) "-"
-        else when {
-            coursework >= 0 && goal!! >= 70 -> "A target"
-            goal!! >= 60 -> "B target"
-            goal!! >= 50 -> "C target"
-            goal!! >= 40 -> "D target"
-            else -> "Below D target"
+    fun save(key: String, value: String) {
+        val safeUnit = unit.trim().ifBlank { "default" }.replace(Regex("[^A-Za-z0-9_-]"), "_")
+        prefs.edit().putString("cat_${safeUnit}_$key", value).apply()
+    }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp)) {
+        SectionHeading("ACADEMIC TRACKER", "Performance")
+        Text("Know where you stand. Plan the mark you need.", color = Muted)
+        Spacer(Modifier.height(14.dp))
+        NeonPanel {
+            Text("COURSEWORK CALCULATOR", color = Cyan, style = MaterialTheme.typography.labelSmall, letterSpacing = 1.sp)
+            Text("CAT 1 + CAT 2  →  /30", color = Color.White, fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(unit, {
+                unit = it
+                prefs.edit().putString("cat_unit", it).apply()
+                val safeUnit = it.trim().ifBlank { "default" }.replace(Regex("[^A-Za-z0-9_-]"), "_")
+                cat1 = prefs.getString("cat_${safeUnit}_cat1", "") ?: ""
+                max1 = prefs.getString("cat_${safeUnit}_max1", "") ?: ""
+                cat2 = prefs.getString("cat_${safeUnit}_cat2", "") ?: ""
+                max2 = prefs.getString("cat_${safeUnit}_max2", "") ?: ""
+                target = prefs.getString("cat_${safeUnit}_target", "70") ?: "70"
+            }, label = { Text("Unit") },
+                modifier = Modifier.fillMaxWidth(), singleLine = true, colors = neonFieldColors())
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ScoreField("CAT 1 score", cat1, { cat1 = it; save("cat1", it) }, Modifier.weight(1f))
+                ScoreField("Out of", max1, { max1 = it; save("max1", it) }, Modifier.weight(1f))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ScoreField("CAT 2 score", cat2, { cat2 = it; save("cat2", it) }, Modifier.weight(1f))
+                ScoreField("Out of", max2, { max2 = it; save("max2", it) }, Modifier.weight(1f))
+            }
+            ScoreField("Target total /100", target, { target = it; save("target", it) }, Modifier.fillMaxWidth())
         }
-
-    LazyColumn(
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        item {
-            Text("CAT & Exam Calculator",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold)
-            Text("Coursework contributes 30 marks. The final exam contributes 70.")
-        }
-
-        item {
-            OutlinedTextField(
-                value = cat1, onValueChange = { cat1 = it },
-                label = { Text("CAT 1 score") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-        item {
-            OutlinedTextField(
-                value = max1, onValueChange = { max1 = it },
-                label = { Text("CAT 1 maximum marks") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-        item {
-            OutlinedTextField(
-                value = cat2, onValueChange = { cat2 = it },
-                label = { Text("CAT 2 score") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-        item {
-            OutlinedTextField(
-                value = max2, onValueChange = { max2 = it },
-                label = { Text("CAT 2 maximum marks") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-        item {
-            OutlinedTextField(
-                value = target, onValueChange = { target = it },
-                label = { Text("Desired final mark (e.g. 70)") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-
-        item {
-            if (valid) {
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("Your results", style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold)
-                        Text("Coursework: ${String.format(Locale.US, "%.2f", coursework)} / 30")
-                        Text("Exam maximum: 70")
-                        HorizontalDivider()
-                        Text("Exam marks needed: ${String.format(Locale.US, "%.2f", needed)} / 70",
-                            fontWeight = FontWeight.Bold)
-                        Text(grade)
-                        when {
-                            needed <= 0 -> Text("You have already reached this target through coursework.")
-                            needed > 70 -> Text("This target is no longer reachable.")
-                            else -> Text("You need at least ${kotlin.math.ceil(needed).toInt()} exam marks to reach your target.")
-                        }
+        Spacer(Modifier.height(12.dp))
+        if (valid) {
+            NeonPanel(accent = Cyan) {
+                Text("YOUR CALCULATED RESULT", color = Muted, style = MaterialTheme.typography.labelSmall)
+                Text(String.format(Locale.US, "%.2f", coursework), color = Cyan,
+                    fontSize = 36.sp, fontWeight = FontWeight.ExtraBold)
+                Text("COURSEWORK CONTRIBUTION OUT OF 30", color = Muted, style = MaterialTheme.typography.labelSmall)
+                HorizontalDivider(color = Color(0xFF35405E), modifier = Modifier.padding(vertical = 12.dp))
+                Text("Final exam target", color = Color.White, fontWeight = FontWeight.Bold)
+                when {
+                    examNeeded <= 0 -> Text("Your coursework already meets this target.", color = Mint)
+                    examNeeded > 70 -> Text("Not reachable: you would need ${String.format(Locale.US, "%.2f", examNeeded)} / 70.", color = Color(0xFFFFA36C))
+                    else -> {
+                        Text("$minExam / 70 marks minimum", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold)
+                        Text("Exact requirement: ${String.format(Locale.US, "%.2f", examNeeded)} marks.", color = Muted)
                     }
                 }
-            } else {
-                Text("Enter valid CAT scores and maximum marks. Scores cannot exceed their maximum.")
+            }
+        } else {
+            NeonPanel(accent = Color(0xFFFFA36C)) {
+                Text("Check your entries", color = Color(0xFFFFB27D), fontWeight = FontWeight.Bold)
+                Text("Enter numeric scores. CAT maximums must be above zero, scores must be between zero and their maximum, and target must be 0–100.", color = Muted)
             }
         }
+        Spacer(Modifier.height(12.dp))
+        Text("Formula: (CAT 1 + CAT 2) ÷ (CAT 1 maximum + CAT 2 maximum) × 30",
+            color = Muted, style = MaterialTheme.typography.bodySmall)
+        Text("Grade boundaries shown in this prototype are editable defaults, not verified official University of Embu regulations.",
+            color = Muted, style = MaterialTheme.typography.labelSmall)
+    }
+}
 
-        item {
-            Text("Default grade targets",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold)
-            Text("A: 70–100")
-            Text("B: 60–69")
-            Text("C: 50–59")
-            Text("D: 40–49")
-            Text("Below 40: F")
-            Text("Grade boundaries can be adjusted if the official university regulations differ.",
-                style = MaterialTheme.typography.bodySmall)
+@Composable
+private fun AssistantScreen() {
+    var question by remember { mutableStateOf("") }
+    var submitted by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxSize().padding(18.dp)) {
+        SectionHeading("YOUR PERSONAL TUTOR", "AI Study Assistant")
+        Text("Ask questions, understand difficult topics and practise for exams.", color = Muted)
+        Spacer(Modifier.height(18.dp))
+        NeonPanel {
+            Text("✧  STUDYPILOT AI", color = Cyan, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
+            Text("Hi! I can help explain concepts, create revision questions and summarise your notes once the AI service is connected.",
+                color = Color.White)
+        }
+        Spacer(Modifier.height(12.dp))
+        if (submitted) {
+            NeonPanel(accent = Violet) {
+                Text("Your prompt", color = Cyan, fontWeight = FontWeight.Bold)
+                Text(question, color = Color.White)
+                Text("AI connection is not configured yet. Your message is not being sent to an AI service.",
+                    color = Muted, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        Spacer(Modifier.weight(1f))
+        OutlinedTextField(value = question, onValueChange = { question = it },
+            modifier = Modifier.fillMaxWidth(), minLines = 2,
+            placeholder = { Text("Ask your study question…") }, colors = neonFieldColors())
+        Spacer(Modifier.height(8.dp))
+        GradientButton("SEND QUESTION", {
+            if (question.isNotBlank()) submitted = true
+        })
+        Text("AI replies, file summaries and quiz generation require the AI service integration.",
+            color = Muted, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+@Composable
+private fun SettingsScreen(notify: Boolean, onNotify: (Boolean) -> Unit) {
+    Column(Modifier.fillMaxSize().padding(18.dp)) {
+        SectionHeading("PREFERENCES", "Settings")
+        NeonPanel {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Study reminders", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("Study, break and exam notifications", color = Muted, style = MaterialTheme.typography.bodySmall)
+                }
+                Switch(checked = notify, onCheckedChange = onNotify)
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        NeonPanel {
+            Text("STUDYPILOT", color = Cyan, fontWeight = FontWeight.Bold)
+            Text("Dark Neon Edition • Android", color = Color.White)
+            Text("Offline unit and CAT data are saved on this device. AI and cloud backup are not connected yet.",
+                color = Muted, style = MaterialTheme.typography.bodySmall)
         }
     }
 }
 
 @Composable
-fun SessionRow(s: Session, checked: Boolean, onCheck: () -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+private fun SessionTile(s: Session, checked: Boolean, onToggle: () -> Unit) {
+    NeonPanel(accent = if (s.exam) Color(0xFFFFA36C) else Blue) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("${s.day} • ${s.start}–${s.end}",
-                    style = MaterialTheme.typography.labelMedium)
-                Text(
-                    s.subject + if (s.exam) " — EXAM" else "",
-                    fontWeight = FontWeight.Bold
-                )
-                Text(s.topic, style = MaterialTheme.typography.bodyMedium)
+                Text("${s.start} – ${s.end}  •  ${s.day}", color = Cyan, style = MaterialTheme.typography.labelSmall)
+                Text(s.subject + if (s.exam) "  EXAM" else "", color = Color.White, fontWeight = FontWeight.Bold)
+                Text(s.topic, color = Muted, style = MaterialTheme.typography.bodySmall)
             }
-            Checkbox(checked = checked, onCheckedChange = { onCheck() })
+            Checkbox(checked = checked, onCheckedChange = { onToggle() },
+                colors = CheckboxDefaults.colors(checkedColor = Mint, uncheckedColor = Muted))
         }
     }
 }
 
+@Composable
+private fun NeonPanel(
+    modifier: Modifier = Modifier,
+    accent: Color = Violet,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column(
+        modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp))
+            .background(Brush.linearGradient(listOf(Panel2, Panel, Color(0xFF10172B))))
+            .border(1.dp, Brush.linearGradient(listOf(accent.copy(alpha = .65f), Blue.copy(alpha = .25f))),
+                RoundedCornerShape(22.dp))
+            .padding(16.dp),
+        content = content
+    )
+}
+
+@Composable
+private fun SectionHeading(kicker: String, title: String) {
+    Text(kicker, color = Cyan, style = MaterialTheme.typography.labelSmall, letterSpacing = 1.8.sp)
+    Text(title, color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+    Spacer(Modifier.height(10.dp))
+}
+
+@Composable
+private fun QuickTile(symbol: String, title: String, modifier: Modifier, tint: Color, onClick: () -> Unit) {
+    NeonPanel(modifier.clickable(onClick = onClick), tint) {
+        Text(symbol, color = tint, fontSize = 24.sp)
+        Spacer(Modifier.height(6.dp))
+        Text(title, color = Color.White, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun NeonAction(symbol: String, onClick: () -> Unit) {
+    TextButton(onClick = onClick) { Text(symbol, color = Cyan, fontSize = 23.sp) }
+}
+
+@Composable
+private fun GradientButton(text: String, onClick: () -> Unit, compact: Boolean = false) {
+    Box(
+        Modifier.fillMaxWidth(if (compact) 0.16f else 1f)
+            .clip(RoundedCornerShape(15.dp))
+            .background(Brush.horizontalGradient(listOf(Violet, Blue, Color(0xFF247DCE))))
+            .clickable(onClick = onClick).padding(horizontal = 18.dp, vertical = 14.dp),
+        contentAlignment = Alignment.Center
+    ) { Text(text, color = Color.White, fontWeight = FontWeight.Bold, letterSpacing = 1.sp) }
+}
+
+@Composable
+private fun ScoreField(label: String, value: String, onValue: (String) -> Unit, modifier: Modifier) {
+    OutlinedTextField(value, onValue, modifier = modifier, label = { Text(label) },
+        singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+        colors = neonFieldColors())
+}
+
+@Composable
+private fun neonFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = Color.White, unfocusedTextColor = Color.White,
+    focusedBorderColor = Cyan, unfocusedBorderColor = Color(0xFF46516E),
+    focusedLabelColor = Cyan, unfocusedLabelColor = Muted,
+    cursorColor = Cyan, focusedContainerColor = Color(0xFF0B1022),
+    unfocusedContainerColor = Color(0xFF0B1022)
+)
